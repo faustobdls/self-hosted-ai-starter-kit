@@ -1,1 +1,4 @@
 .env
+comfy_output/*
+comfyui_models/*
+n8n/*

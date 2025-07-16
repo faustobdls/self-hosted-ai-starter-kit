@@ -5,11 +5,16 @@ volumes:
   qdrant_storage:
 
 networks:
-  demo:
+  external-network:
+    driver: bridge
+  internal-network:
+    driver: bridge
+    internal: true
+
 
 x-n8n: &service-n8n
   image: n8nio/n8n:latest
-  networks: ['demo']
+  networks: ['internal-network', 'external-network','default']
   environment:
     - DB_TYPE=postgresdb
     - DB_POSTGRESDB_HOST=postgres
@@ -23,20 +28,27 @@ x-n8n: &service-n8n
   env_file:
     - path: .env
       required: true
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
 
 x-ollama: &service-ollama
   image: ollama/ollama:latest
   container_name: ollama
-  networks: ['demo']
+  networks: ['internal-network','default']
   restart: unless-stopped
   ports:
     - 11434:11434
   volumes:
     - ollama_storage:/root/.ollama
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
+
 
 x-init-ollama: &init-ollama
   image: ollama/ollama:latest
-  networks: ['demo']
+  networks: ['internal-network']
   container_name: ollama-pull-llama
   volumes:
     - ollama_storage:/root/.ollama
@@ -45,13 +57,17 @@ x-init-ollama: &init-ollama
     - OLLAMA_HOST=ollama:11434
   command:
     - "-c"
-    - "sleep 3; ollama pull llama3.2"
+    - "sleep 3; ollama pull deepseek-r1:14b; sleep 3; ollama pull gemma3:12b"
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
+
 
 services:
   postgres:
     image: postgres:16-alpine
     hostname: postgres
-    networks: ['demo']
+    networks: ['internal-network']
     restart: unless-stopped
     environment:
       - POSTGRES_USER
@@ -90,17 +106,38 @@ services:
       - n8n_storage:/home/node/.n8n
       - ./n8n/demo-data:/demo-data
       - ./shared:/data/shared
+      - ./comfy_output:/comfyui_output
     depends_on:
       postgres:
         condition: service_healthy
       n8n-import:
         condition: service_completed_successfully
 
+  comfyui:
+    image: faustobdls/comfyui:latest
+    container_name: comfyui
+    command: --listen 0.0.0.0 --port 8188
+    restart: unless-stopped
+    ports:
+      - "8188:8188"
+    volumes:
+      - ./comfy_output:/app/comfyui/output
+      - ./comfyui_models:/app/comfyui/models
+      - ./comfyui_models/checkpoints:/app/comfyui/models/checkpoints
+    networks: ['internal-network', 'external-network']
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
   qdrant:
     image: qdrant/qdrant
     hostname: qdrant
     container_name: qdrant
-    networks: ['demo']
+    networks: ['internal-network']
     restart: unless-stopped
     ports:
       - 6333:6333
